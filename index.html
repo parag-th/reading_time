@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reading Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<!--
+  FIREBASE: same setup as the Study Tracker. If you open this on the same site/browser as the
+  study tracker, your saved config is reused automatically. Data is stored in Firestore at
+  tracker/reading (separate from the study tracker's tracker/data document).
+-->
+<style>
+:root{--bg:#0a0a0f;--surface:#111118;--surface2:#1a1a25;--border:#2a2a3a;--accent:#e8ff47;--bitch:#ff4757;--accent3:#47c4ff;--text:#e8e8f0;--dim:#6b6b80;--green:#39ff85;--radius:12px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;min-height:100vh;overflow-x:hidden}
+button{font-family:inherit}
+/* setup + loading */
+#setup-screen{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;align-items:center;justify-content:center;padding:20px;overflow:auto}
+.setup-box{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:36px;width:100%;max-width:520px}
+.setup-box h2{font-family:'Bebas Neue';font-size:32px;letter-spacing:3px;margin-bottom:6px}.setup-box h2 span{color:var(--accent)}
+.setup-sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:22px;line-height:1.6}
+.setup-input{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;padding:10px 14px;border-radius:8px;outline:none;width:100%;margin-bottom:10px}
+.setup-input:focus{border-color:var(--accent3)}
+.setup-err{font-size:11px;color:var(--bitch);margin:4px 0 10px;display:none}
+.btn-connect{width:100%;background:var(--accent);border:none;color:#000;font-size:13px;letter-spacing:3px;font-weight:700;text-transform:uppercase;padding:15px;border-radius:10px;cursor:pointer;margin-top:6px}
+.btn-connect:disabled{opacity:.5}
+.loading-screen{position:fixed;inset:0;background:var(--bg);z-index:400;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;transition:opacity .4s}
+.loading-screen.hidden{opacity:0;pointer-events:none}
+.loader-title{font-family:'Bebas Neue';font-size:28px;letter-spacing:4px;color:var(--dim)}
+.loader-bar{width:200px;height:2px;background:var(--border);overflow:hidden}
+.loader-fill{height:100%;background:var(--accent);animation:load 1.2s ease-in-out infinite}
+@keyframes load{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
+/* app */
+.app{max-width:900px;margin:0 auto;padding:32px 20px 60px;display:none}
+h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;line-height:.9}
+.month-label{font-size:11px;letter-spacing:4px;color:var(--dim);text-transform:uppercase;margin-top:8px}
+.status-banner{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 24px 18px 28px;margin-top:20px;position:relative;overflow:hidden}
+.status-banner::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--sc,var(--bitch));transition:background .4s}
+.status-main{font-family:'Bebas Neue';font-size:clamp(26px,5.5vw,40px);letter-spacing:3px;line-height:1.05;color:var(--sc,var(--bitch))}
+.status-sub{font-size:12px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-top:4px}
+.status-sub.win{color:var(--accent3)}
+.today-total{font-size:13px;font-weight:500;margin-top:10px}
+@keyframes glow{0%,100%{text-shadow:0 0 20px rgba(232,255,71,.4)}50%{text-shadow:0 0 40px rgba(232,255,71,.8),0 0 80px rgba(232,255,71,.3)}}
+.glow{animation:glow 2s ease-in-out infinite}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:16px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px}
+.stat-val{font-family:'Bebas Neue';font-size:38px;letter-spacing:2px;color:var(--accent);line-height:1}
+.stat-val.c3{color:var(--accent3)}.stat-val.g{color:var(--green)}
+.stat-key{font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-top:6px}
+.actions-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center}
+.btn{font-size:11px;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--border);background:var(--surface);color:var(--dim);padding:10px 18px;border-radius:8px;cursor:pointer;transition:all .2s}
+.btn:hover{border-color:var(--dim);color:var(--text)}
+.btn.danger{border-color:#ff4757;color:#ff4757}.btn.danger:hover{background:rgba(255,71,87,.1)}
+.btn.warn{border-color:#ffa000;color:#ffa000}.btn.warn:hover{background:rgba(255,160,0,.1)}
+.btn.ghost{border-color:transparent;font-size:10px}
+.sync-bar{display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-left:auto}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.sync-dot.syncing{background:var(--accent);animation:pd 1s infinite}.sync-dot.synced{background:var(--green)}.sync-dot.error{background:var(--bitch)}
+@keyframes pd{50%{opacity:.3}}
+.prev-months-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+.pm-label{font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;width:100%;margin-bottom:4px}
+.month-pill{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;display:flex;gap:8px}
+.month-pill b{color:var(--accent3)}
+.month-nav{display:flex;align-items:center;gap:14px;margin:28px 0 20px}
+.month-nav-title{font-family:'Bebas Neue';font-size:22px;letter-spacing:3px;flex:1}
+.nav-btn{background:var(--surface);border:1px solid var(--border);color:var(--dim);width:36px;height:36px;border-radius:8px;cursor:pointer;font-size:16px}
+.nav-btn:hover{border-color:var(--accent);color:var(--accent)}.nav-btn:disabled{opacity:.3;cursor:default;border-color:var(--border);color:var(--dim)}
+.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.day-header{font-size:10px;letter-spacing:2px;color:var(--dim);text-align:center;padding:8px 4px;text-transform:uppercase}
+.day-cell{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 8px 8px;min-height:86px;cursor:pointer;transition:all .2s;position:relative;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.day-cell:hover{border-color:rgba(232,255,71,.3);transform:translateY(-1px)}
+.day-cell.empty{background:transparent;border-color:transparent;pointer-events:none}
+.day-cell.future{opacity:.4;cursor:default;pointer-events:none}
+@keyframes pb{0%,100%{border-color:rgba(232,255,71,.5)}50%{border-color:rgba(232,255,71,.9)}}
+.day-cell.today{background:var(--surface2);animation:pb 2.5s ease-in-out infinite}
+.day-cell.done{border-color:var(--green);background:rgba(57,255,133,.06)}
+.day-cell.miss{border-color:var(--bitch);background:rgba(255,71,87,.06)}
+.day-top{display:flex;align-items:center;justify-content:space-between}
+.day-num{font-size:13px;font-weight:700;color:var(--dim);line-height:1}
+.today .day-num{color:var(--accent)}.done .day-num{color:var(--green)}.miss .day-num{color:var(--bitch)}
+.day-check{width:20px;height:20px;border:1.5px solid var(--border);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px}
+.done .day-check{background:var(--green);border-color:var(--green);color:#000}
+.miss .day-check{background:var(--bitch);border-color:var(--bitch);color:#fff}
+.day-time{font-size:18px;font-family:'Bebas Neue';letter-spacing:1px;color:var(--dim);line-height:1}
+.today .day-time{color:var(--accent)}.done .day-time{color:var(--green)}.miss .day-time{color:var(--bitch)}
+.day-sub{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase}
+.today-tag{position:absolute;top:4px;right:6px;font-size:7px;letter-spacing:2px;color:var(--accent);opacity:.7}
+@media(max-width:580px){.calendar{gap:4px}.day-cell{min-height:66px;padding:8px 5px 6px}.day-time{font-size:14px}.day-num{font-size:11px}.day-check{width:16px;height:16px;font-size:9px}.stats-row{grid-template-columns:repeat(2,1fr)}.day-sub{font-size:8px}}
+/* top bar + notes */
+.topbar{display:none;position:sticky;top:0;z-index:50;padding:10px 20px;background:rgba(10,10,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.tb-in{max-width:900px;margin:0 auto;display:flex;gap:8px}
+.tab{font-size:11px;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);color:var(--dim);padding:10px 22px;border-radius:8px;cursor:pointer;transition:all .2s}
+.tab:hover{color:var(--text);border-color:var(--dim)}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
+.tab .cnt{margin-left:6px;opacity:.7}
+.notes-page{display:none;max-width:900px;margin:0 auto;padding:32px 20px 60px}
+.np-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:20px 0}
+.np-card h2{font-family:'Bebas Neue';font-size:22px;letter-spacing:3px;margin-bottom:14px}
+.np-row{display:grid;grid-template-columns:170px 1fr;gap:12px;margin-bottom:14px}
+.np-lbl{font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;display:block;margin-bottom:6px}
+.np-in{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:13px;padding:11px 14px;border-radius:10px;outline:none;color-scheme:dark}
+.np-in:focus{border-color:var(--accent3)}
+.np-err{font-size:11px;color:var(--bitch);margin-bottom:10px;display:none}
+.np-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin-bottom:10px;cursor:pointer;transition:all .2s}
+.np-item:hover{border-color:rgba(232,255,71,.4);transform:translateY(-1px)}
+.np-date{font-size:11px;letter-spacing:2px;color:var(--accent);font-weight:700;display:flex;align-items:center;gap:10px}
+.np-badge{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent3);border:1px solid var(--accent3);border-radius:10px;padding:1px 8px}
+.np-title{font-family:'Bebas Neue';font-size:22px;letter-spacing:2px;margin:4px 0 2px}
+.np-prev{font-size:12px;color:var(--dim);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:pre-wrap}
+.np-empty{color:var(--dim);font-size:12px;letter-spacing:1px;text-align:center;padding:30px 0}
+.np-status{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
+@media(max-width:580px){.np-row{grid-template-columns:1fr}.tab{flex:1;padding:10px 8px}}
+/* modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;opacity:0;pointer-events:none;transition:opacity .2s;overflow:auto}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:420px;margin:auto}
+.modal-title{font-family:'Bebas Neue';font-size:28px;letter-spacing:3px;margin-bottom:6px}.modal-title span{color:var(--accent)}
+.modal-sum{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:18px}
+.modal-sum b{color:var(--accent3)}
+.sess{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;font-size:14px}
+.sess .t{flex:1;font-weight:700}.sess .d{color:var(--accent3);font-size:12px}
+.sess .x{background:none;border:1px solid var(--border);color:var(--dim);width:28px;height:28px;border-radius:6px;cursor:pointer}
+.sess .x:hover{border-color:var(--bitch);color:var(--bitch)}
+.sess .x.ed:hover{border-color:var(--accent);color:var(--accent)}
+.btn-add{width:100%;background:transparent;border:1px dashed var(--accent);color:var(--accent);font-size:12px;letter-spacing:2px;text-transform:uppercase;padding:13px;border-radius:10px;cursor:pointer;margin:6px 0 18px}
+.btn-add:hover{background:rgba(232,255,71,.08)}
+.pickers{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-label{font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-bottom:8px;display:block;text-align:center}
+.time-in{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:24px;font-weight:700;text-align:center;padding:8px;border-radius:10px;outline:none;margin-bottom:8px}
+.time-in:focus{border-color:var(--accent)}
+.wheels{position:relative;display:flex;height:200px;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.wheels::before{content:'';position:absolute;left:6px;right:6px;top:80px;height:40px;border-radius:8px;background:rgba(232,255,71,.08);border:1px solid rgba(232,255,71,.35);pointer-events:none}
+.wheels::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(var(--bg) 0,transparent 35%,transparent 65%,var(--bg) 100%)}
+.wheel{flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;padding:80px 0;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.wheel::-webkit-scrollbar{display:none}
+.wheel div{height:40px;line-height:40px;text-align:center;font-size:20px;font-weight:500;scroll-snap-align:center;color:var(--text);cursor:pointer}
+.colon{align-self:center;z-index:1;color:var(--dim);font-weight:700}
+.dur-prev{text-align:center;font-size:12px;letter-spacing:2px;color:var(--dim);margin:14px 0 4px;text-transform:uppercase;min-height:18px}
+.dur-prev b{color:var(--green)}.dur-prev.err{color:var(--bitch)}
+.notes-input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;padding:12px 14px;border-radius:10px;resize:vertical;min-height:64px;outline:none;margin-top:12px}
+.notes-input:focus{border-color:var(--accent3)}
+.sess{flex-wrap:wrap}
+.sess .n{width:100%;font-size:11px;color:var(--dim);line-height:1.5;white-space:pre-wrap;word-break:break-word;border-top:1px solid var(--border);padding-top:8px;margin-top:2px}
+.note-dot{position:absolute;bottom:7px;right:7px;width:6px;height:6px;background:var(--accent3);border-radius:50%;opacity:.7}
+.modal-actions{display:flex;gap:10px;margin-top:18px}
+.btn-save{flex:1;background:var(--accent);border:none;color:#000;font-size:12px;letter-spacing:2px;font-weight:700;text-transform:uppercase;padding:14px;border-radius:10px;cursor:pointer}
+.btn-save:hover{opacity:.85}
+.btn-cancel{background:transparent;border:1px solid var(--border);color:var(--text);font-size:12px;letter-spacing:2px;text-transform:uppercase;padding:14px 20px;border-radius:10px;cursor:pointer}
+.confirm-dialog{background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:28px;width:100%;max-width:340px}
+.confirm-dialog h3{font-family:'Bebas Neue';font-size:22px;letter-spacing:2px;margin-bottom:10px}
+.confirm-dialog p{font-size:12px;color:var(--dim);line-height:1.6;margin-bottom:22px}
+.confirm-btns{display:flex;gap:10px}
+.btn-yes{flex:1;background:var(--bitch);border:none;color:#fff;font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:12px;border-radius:8px;cursor:pointer}
+.btn-no{flex:1;background:transparent;border:1px solid var(--border);color:var(--dim);font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:12px;border-radius:8px;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div class="loading-screen" id="loading-screen"><div class="loader-title">CONNECTING</div><div class="loader-bar"><div class="loader-fill"></div></div></div>
+
+<div id="setup-screen">
+  <div class="setup-box">
+    <h2>CONNECT <span>FIREBASE</span></h2>
+    <div class="setup-sub">Paste the same firebaseConfig values you used for the study tracker. Firestore must be enabled in test mode.</div>
+    <input class="setup-input" id="cfg-apiKey" placeholder="API Key (AIzaSy...)">
+    <input class="setup-input" id="cfg-authDomain" placeholder="Auth Domain (your-project.firebaseapp.com)">
+    <input class="setup-input" id="cfg-projectId" placeholder="Project ID">
+    <input class="setup-input" id="cfg-appId" placeholder="App ID (1:123:web:abc)">
+    <div class="setup-err" id="setup-err">⚠ Check your values and make sure Firestore is enabled in test mode.</div>
+    <button class="btn-connect" id="btn-connect" onclick="connectFirebase()">Connect & Start Tracking</button>
+  </div>
+</div>
+
+<nav class="topbar" id="topbar"><div class="tb-in">
+  <button class="tab active" data-tab="tracker">Tracker</button>
+  <button class="tab" data-tab="notes">Notes<span class="cnt" id="notes-count"></span></button>
+</div></nav>
+
+<div class="app" id="main-app">
+  <h1>READING<br>TRACKER</h1>
+  <div class="month-label" id="month-label">Loading...</div>
+
+  <div class="status-banner" id="status-banner">
+    <div class="status-main" id="status-main">—</div>
+    <div class="status-sub" id="status-sub"></div>
+    <div class="today-total" id="today-total"></div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-val c3" id="total-val">0m</div><div class="stat-key">Total Reading This Month</div></div>
+    <div class="stat-card"><div class="stat-val g" id="done-val">0</div><div class="stat-key">Days Completed</div></div>
+    <div class="stat-card"><div class="stat-val" id="elapsed-val">0</div><div class="stat-key">Days Elapsed</div></div>
+    <div class="stat-card"><div class="stat-val" id="avg-val">0m</div><div class="stat-key">Avg Time / Day</div></div>
+  </div>
+
+  <div class="actions-row">
+    <button class="btn warn" onclick="confirmReset('day')">⟳ Reset Today</button>
+    <button class="btn danger" onclick="confirmReset('month')">✕ Reset Month</button>
+    <div class="sync-bar"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">—</span></div>
+    <button class="btn ghost" onclick="disconnectFirebase()">⚙ Disconnect</button>
+  </div>
+
+  <div class="prev-months-bar" id="prev-months-bar"></div>
+
+  <div class="month-nav">
+    <button class="nav-btn" id="prev-nav" onclick="navigateMonth(-1)">‹</button>
+    <div class="month-nav-title" id="nav-title">—</div>
+    <button class="nav-btn" id="next-nav" onclick="navigateMonth(1)">›</button>
+  </div>
+  <div class="calendar" id="calendar-grid"></div>
+</div>
+
+<!-- Notes page -->
+<div class="notes-page" id="notes-page">
+  <h1>NOTES</h1>
+  <div id="np-list-view">
+    <div class="np-card">
+      <h2>New note</h2>
+      <div class="np-row">
+        <div><label class="np-lbl">Date *</label><input type="date" class="np-in" id="new-date"></div>
+        <div><label class="np-lbl">Title *</label><input class="np-in" id="new-title" maxlength="120" placeholder="e.g. Ideas from chapter 3"></div>
+      </div>
+      <div class="np-err" id="new-err"></div>
+      <button class="btn-save" style="width:100%" id="np-create">Create & start writing</button>
+    </div>
+    <div id="np-list"></div>
+  </div>
+  <div id="np-edit-view" style="display:none">
+    <div class="np-card">
+      <div class="np-row">
+        <div><label class="np-lbl">Date</label><input type="date" class="np-in" id="ed-date"></div>
+        <div><label class="np-lbl">Title</label><input class="np-in" id="ed-title" maxlength="120"></div>
+      </div>
+      <label class="np-lbl">Your notes</label>
+      <textarea class="notes-input" id="ed-body" maxlength="100000" style="min-height:320px;margin-top:0" placeholder="Write your notes here..."></textarea>
+      <div class="modal-actions" style="align-items:center">
+        <span class="np-status" id="ed-status" style="flex:1"></span>
+        <button class="btn danger" id="ed-delete">Delete note</button>
+        <button class="btn-cancel" id="ed-back">← All notes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Day modal -->
+<div class="modal-overlay" id="day-modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">DAY <span>—</span></div>
+
+    <div id="view-list">
+      <div class="modal-sum" id="modal-sum"></div>
+      <div id="sess-list"></div>
+      <button class="btn-add" onclick="showAdd()">+ Add Session</button>
+      <div class="modal-actions" style="margin-top:0"><button class="btn-save" onclick="closeModal()">Done</button></div>
+    </div>
+
+    <div id="view-add" style="display:none">
+      <div class="pickers">
+        <div><label class="form-label">Start</label><input class="time-in" id="in-start" maxlength="5" inputmode="numeric"><div class="wheels"><div class="wheel" id="wh-start-h"></div><div class="colon">:</div><div class="wheel" id="wh-start-m"></div></div></div>
+        <div><label class="form-label">End</label><input class="time-in" id="in-end" maxlength="5" inputmode="numeric"><div class="wheels"><div class="wheel" id="wh-end-h"></div><div class="colon">:</div><div class="wheel" id="wh-end-m"></div></div></div>
+      </div>
+      <div class="dur-prev" id="dur-prev"></div>
+      <textarea class="notes-input" id="note-in" maxlength="300" placeholder="What did you read... (optional)"></textarea>
+      <div class="modal-actions"><button class="btn-save" id="btn-save-sess" onclick="saveSession()">Save Session</button><button class="btn-cancel" onclick="cancelAdd()">Cancel</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div class="modal-overlay" id="confirm-modal">
+  <div class="confirm-dialog">
+    <h3 id="confirm-title">Confirm</h3><p id="confirm-msg"></p>
+    <div class="confirm-btns"><button class="btn-yes" id="confirm-yes">Yes, Reset</button><button class="btn-no" onclick="closeConfirm()">Cancel</button></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const CFG_KEY = 'reading_tracker_firebase_cfg';
+const OLD_KEY = 'study_tracker_firebase_cfg'; // reuse study tracker config if present
+const GOAL = 10; // minutes per day
+const loadCfg = () => { try { return JSON.parse(localStorage.getItem(CFG_KEY) || localStorage.getItem(OLD_KEY)); } catch { return null; } };
+
+let db = null, unsubscribe = null, data = { months: {} };
+const today = new Date();
+let viewYear = today.getFullYear(), viewMonth = today.getMonth();
+let editingDay = null, pendingReset = null, editingEntry = null;
+let currentTab = 'tracker', editingNoteId = null, noteTimer = null, noteDirty = false;
+const $ = id => document.getElementById(id);
+
+Object.assign(window, { connectFirebase, disconnectFirebase, navigateMonth, closeModal, showAdd, cancelAdd, saveSession, confirmReset, closeConfirm });
+
+// ── Init / Firebase ──
+const savedCfg = loadCfg();
+if (savedCfg) initApp(savedCfg).catch(() => showSetup());
+else showSetup();
+
+function showSetup() {
+  $('loading-screen').classList.add('hidden');
+  setTimeout(() => { $('loading-screen').style.display = 'none'; $('setup-screen').style.display = 'flex'; }, 400);
+}
+
+async function connectFirebase() {
+  const cfg = { apiKey: $('cfg-apiKey').value.trim(), authDomain: $('cfg-authDomain').value.trim(), projectId: $('cfg-projectId').value.trim(), appId: $('cfg-appId').value.trim() };
+  if (!cfg.apiKey || !cfg.projectId || !cfg.appId) { $('setup-err').style.display = 'block'; return; }
+  $('btn-connect').disabled = true; $('btn-connect').textContent = 'Connecting...'; $('setup-err').style.display = 'none';
+  try { await initApp(cfg); localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+  catch (e) {
+    const hints = {
+      'permission-denied': 'Firestore rules are blocking access. In Firestore > Rules, allow read, write (test mode).',
+      'unavailable': 'Cannot reach Firestore. Make sure a Firestore database has been created in this project (Build > Firestore Database > Create database).',
+      'failed-precondition': 'Firestore has not been created in this project yet.',
+      'not-found': 'Firestore database not found. Create it in the Firebase console first.',
+      'invalid-argument': 'One of the config values looks wrong.'
+    };
+    $('setup-err').textContent = '⚠ ' + (e.code || 'error') + ': ' + (hints[(e.code || '').replace('firestore/', '')] || e.message);
+    console.error(e);
+    $('setup-err').style.display = 'block'; $('btn-connect').disabled = false; $('btn-connect').textContent = 'Connect & Start Tracking'; }
+}
+
+async function initApp(cfg) {
+  const app = initializeApp(cfg, 'reading-' + Date.now());
+  db = getFirestore(app);
+  const ref = doc(db, 'tracker', 'reading');
+  await getDoc(ref);
+  $('loading-screen').classList.add('hidden');
+  $('setup-screen').style.display = 'none';
+  setTimeout(() => { $('loading-screen').style.display = 'none'; $('topbar').style.display = 'block'; showTab(currentTab); }, 400);
+  setSync('syncing', 'Connecting...');
+  unsubscribe = onSnapshot(ref, snap => {
+    data = snap.exists() ? snap.data() : { months: {} };
+    if (!data.months) data.months = {};
+    if (!data.notes) data.notes = {};
+    setSync('synced', 'Synced');
+    render();
+    if (editingDay !== null && $('day-modal').classList.contains('open') && $('view-list').style.display !== 'none') renderSessions();
+  }, err => { setSync('error', 'Sync error'); console.error(err); });
+}
+
+function disconnectFirebase() { if (unsubscribe) unsubscribe(); localStorage.removeItem(CFG_KEY); localStorage.removeItem(OLD_KEY); location.reload(); }
+function setSync(s, l) { $('sync-dot').className = 'sync-dot ' + s; $('sync-label').textContent = l; }
+async function persist() {
+  if (!db) return;
+  setSync('syncing', 'Saving...');
+  try { await setDoc(doc(db, 'tracker', 'reading'), data); setSync('synced', 'Saved'); }
+  catch (e) { setSync('error', 'Save failed'); console.error(e); }
+}
+
+// ── Helpers (all time math in whole minutes → no float rounding issues) ──
+const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}`;
+const pad = n => String(n).padStart(2, '0');
+function getMonth(y, m) { const k = monthKey(y, m); if (!data.months[k]) data.months[k] = { days: {} }; if (!data.months[k].days) data.months[k].days = {}; return data.months[k]; }
+const getEntries = (y, m, d) => (getMonth(y, m).days[d] || {}).entries || [];
+const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+const dur = e => { const s = toMin(e.start), n = toMin(e.end); return n > s ? n - s : n + 1440 - s; };
+const sumMin = es => es.reduce((a, e) => a + dur(e), 0);
+const fmt = m => { m = Math.round(m); const h = Math.floor(m / 60); return h ? `${h}h ${m % 60}m` : `${m}m`; };
+const monthName = (y, m) => new Date(y, m, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+const shortMonth = (y, m) => new Date(y, m, 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+const isFuture = (y, m, d) => new Date(y, m, d) > new Date(today.getFullYear(), today.getMonth(), today.getDate());
+const isToday = (y, m, d) => y === today.getFullYear() && m === today.getMonth() && d === today.getDate();
+
+// ── Render ──
+function render() { renderHeader(); renderCalendar(); renderPrev(); renderNotes(); }
+
+function renderHeader() {
+  $('month-label').textContent = (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 'Current Month' : monthName(viewYear, viewMonth);
+  const t = sumMin(getEntries(today.getFullYear(), today.getMonth(), today.getDate()));
+  const main = $('status-main'), sub = $('status-sub'), ban = $('status-banner');
+  if (t >= GOAL) {
+    main.textContent = 'Best YouTuber with 100K+ Subs'; main.className = 'status-main glow';
+    sub.textContent = 'Way to earn CRs'; sub.className = 'status-sub win';
+    ban.style.setProperty('--sc', 'var(--accent)');
+  } else {
+    main.textContent = 'Wasting Potential'; main.className = 'status-main';
+    sub.textContent = 'Time will never come back'; sub.className = 'status-sub';
+    ban.style.setProperty('--sc', 'var(--bitch)');
+  }
+  $('today-total').textContent = `${fmt(t)} read today · goal ${GOAL}m`;
+
+  const md = getMonth(today.getFullYear(), today.getMonth());
+  let total = 0, done = 0;
+  Object.values(md.days).forEach(v => { const s = sumMin(v.entries || []); total += s; if (s >= GOAL) done++; });
+  const el = today.getDate();
+  $('total-val').textContent = fmt(total); $('done-val').textContent = done; $('elapsed-val').textContent = el; $('avg-val').textContent = fmt(total / el);
+}
+
+function renderCalendar() {
+  const grid = $('calendar-grid'); grid.innerHTML = '';
+  const vy = viewYear, vm = viewMonth;
+  $('nav-title').textContent = monthName(vy, vm).toUpperCase();
+  $('next-nav').disabled = monthKey(vy, vm) >= monthKey(today.getFullYear(), today.getMonth());
+  ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(d => { const h = document.createElement('div'); h.className = 'day-header'; h.textContent = d; grid.appendChild(h); });
+  const first = (new Date(vy, vm, 1).getDay() + 6) % 7, days = new Date(vy, vm + 1, 0).getDate();
+  for (let i = 0; i < first; i++) { const e = document.createElement('div'); e.className = 'day-cell empty'; grid.appendChild(e); }
+  for (let d = 1; d <= days; d++) {
+    const es = getEntries(vy, vm, d), tot = sumMin(es), fut = isFuture(vy, vm, d), td = isToday(vy, vm, d);
+    const cell = document.createElement('div');
+    let cls = 'day-cell';
+    if (fut) cls += ' future'; else if (td) cls += ' today';
+    if (!fut && tot >= GOAL) cls += ' done'; else if (!fut && !td) cls += ' miss';
+    cell.className = cls;
+    cell.innerHTML = `<div class="day-top"><div class="day-num">${d}</div><div class="day-check">${tot >= GOAL ? '✓' : ''}</div></div>` +
+      (td ? '<div class="today-tag">TODAY</div>' : '') +
+      `<div class="day-time">${tot ? fmt(tot) : '—'}</div><div class="day-sub">${es.length ? es.length + (es.length > 1 ? ' sessions' : ' session') : ''}</div>` +
+      (es.some(e => e.note) ? '<div class="note-dot"></div>' : '');
+    if (!fut) cell.onclick = () => openDay(d);
+    grid.appendChild(cell);
+  }
+}
+
+function renderPrev() {
+  const bar = $('prev-months-bar'); bar.innerHTML = '';
+  const cur = monthKey(today.getFullYear(), today.getMonth());
+  const keys = Object.keys(data.months).filter(k => k < cur).sort().reverse().slice(0, 6);
+  if (!keys.length) return;
+  bar.innerHTML = '<div class="pm-label">Previous Months</div>';
+  keys.forEach(k => {
+    const [y, m] = k.split('-').map(Number);
+    const t = Object.values(data.months[k].days || {}).reduce((a, v) => a + sumMin(v.entries || []), 0);
+    const p = document.createElement('div'); p.className = 'month-pill';
+    p.innerHTML = `${shortMonth(y, m - 1)} <b>${fmt(t)}</b>`; bar.appendChild(p);
+  });
+}
+
+function navigateMonth(dir) {
+  viewMonth += dir;
+  if (viewMonth > 11) { viewMonth = 0; viewYear++; } if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  renderCalendar();
+}
+
+// ── Time picker wheels ──
+const IH = 40;
+const pickers = {
+  start: { h: 0, m: 0, hEl: $('wh-start-h'), mEl: $('wh-start-m'), inp: $('in-start') },
+  end:   { h: 0, m: 0, hEl: $('wh-end-h'),   mEl: $('wh-end-m'),   inp: $('in-end') }
+};
+function buildWheel(el, max, onPick) {
+  for (let i = 0; i < max; i++) { const d = document.createElement('div'); d.textContent = pad(i); d.onclick = () => el.scrollTo({ top: i * IH, behavior: 'smooth' }); el.appendChild(d); }
+  let t; el.addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(() => onPick(Math.max(0, Math.min(max - 1, Math.round(el.scrollTop / IH)))), 90); });
+}
+Object.entries(pickers).forEach(([k, p]) => {
+  buildWheel(p.hEl, 24, v => { p.h = v; syncInput(p); updateDur(); });
+  buildWheel(p.mEl, 60, v => { p.m = v; syncInput(p); updateDur(); });
+  p.inp.addEventListener('change', () => {
+    const digits = p.inp.value.replace(/\D/g, '');
+    let h, m;
+    if (p.inp.value.includes(':')) { [h, m] = p.inp.value.split(':').map(x => parseInt(x) || 0); }
+    else if (digits.length <= 2) { h = parseInt(digits) || 0; m = 0; }
+    else { h = parseInt(digits.slice(0, -2)); m = parseInt(digits.slice(-2)); }
+    setPicker(p, Math.min(23, h), Math.min(59, m));
+  });
+  p.inp.addEventListener('focus', () => p.inp.select());
+});
+function syncInput(p) { p.inp.value = `${pad(p.h)}:${pad(p.m)}`; }
+function setPicker(p, h, m) {
+  p.h = h; p.m = m; syncInput(p);
+  p.hEl.scrollTop = h * IH; p.mEl.scrollTop = m * IH; updateDur();
+}
+function updateDur() {
+  const s = pickers.start, e = pickers.end, el = $('dur-prev');
+  const sm = s.h * 60 + s.m, em = e.h * 60 + e.m;
+  if (sm === em) { el.className = 'dur-prev err'; el.textContent = 'Start and end can\u2019t be the same'; return; }
+  const d = em > sm ? em - sm : em + 1440 - sm;
+  el.className = 'dur-prev';
+  el.innerHTML = `Duration <b>${fmt(d)}</b>${em < sm ? ' · crosses midnight' : ''}`;
+}
+
+// ── Day modal ──
+function openDay(d) {
+  editingDay = d;
+  $('modal-title').innerHTML = `DAY <span>${d}</span> · ${shortMonth(viewYear, viewMonth).toUpperCase()}`;
+  $('day-modal').classList.add('open');
+  if (getEntries(viewYear, viewMonth, d).length) showList(); else showAdd();
+}
+function closeModal() { $('day-modal').classList.remove('open'); editingDay = null; }
+function showList() { $('view-add').style.display = 'none'; $('view-list').style.display = 'block'; renderSessions(); }
+function renderSessions() {
+  const es = [...getEntries(viewYear, viewMonth, editingDay)].sort((a, b) => toMin(a.start) - toMin(b.start));
+  $('modal-sum').innerHTML = `Total <b>${fmt(sumMin(es))}</b> · ${es.length} session${es.length === 1 ? '' : 's'}`;
+  const list = $('sess-list'); list.innerHTML = '';
+  es.forEach(e => {
+    const r = document.createElement('div'); r.className = 'sess';
+    r.innerHTML = `<div class="t">${e.start} → ${e.end}</div><div class="d">${fmt(dur(e))}</div>`;
+    const ed = document.createElement('button'); ed.className = 'x ed'; ed.textContent = '✎'; ed.title = 'Edit session'; ed.onclick = () => showAdd(e); r.appendChild(ed);
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'Delete session';
+    x.onclick = () => deleteSession(e); r.appendChild(x);
+    if (e.note) { const n = document.createElement('div'); n.className = 'n'; n.textContent = e.note; r.appendChild(n); }
+    list.appendChild(r);
+  });
+}
+function showAdd(entry) {
+  editingEntry = (entry && entry.start) ? entry : null;
+  $('btn-save-sess').textContent = editingEntry ? 'Update Session' : 'Save Session';
+  $('view-list').style.display = 'none'; $('view-add').style.display = 'block'; $('note-in').value = editingEntry ? (editingEntry.note || '') : '';
+  const es = getEntries(viewYear, viewMonth, editingDay);
+  const now = new Date(); let nowM = now.getHours() * 60 + now.getMinutes();
+  let sMin, eMin;
+  if (editingEntry) { sMin = toMin(editingEntry.start); eMin = toMin(editingEntry.end); }
+  else if (es.length) { const last = [...es].sort((a, b) => toMin(a.end) - toMin(b.end)).pop(); sMin = toMin(last.end); eMin = Math.min(sMin + 10, 1439); }
+  else { eMin = nowM; sMin = Math.max(0, nowM - 10); }
+  requestAnimationFrame(() => {
+    setPicker(pickers.start, Math.floor(sMin / 60), sMin % 60);
+    setPicker(pickers.end, Math.floor(eMin / 60), eMin % 60);
+  });
+}
+function cancelAdd() { editingEntry = null; if (getEntries(viewYear, viewMonth, editingDay).length) showList(); else closeModal(); }
+
+async function saveSession() {
+  const s = pickers.start, e = pickers.end;
+  if (s.h * 60 + s.m === e.h * 60 + e.m) return;
+  const md = getMonth(viewYear, viewMonth);
+  const day = md.days[editingDay] || { entries: [] };
+  const ne = { start: `${pad(s.h)}:${pad(s.m)}`, end: `${pad(e.h)}:${pad(e.m)}`, note: $('note-in').value.trim() };
+  day.entries = day.entries || [];
+  if (editingEntry) {
+    let i = day.entries.indexOf(editingEntry);
+    if (i < 0) i = day.entries.findIndex(x => x.start === editingEntry.start && x.end === editingEntry.end && (x.note || '') === (editingEntry.note || ''));
+    if (i > -1) day.entries[i] = ne; else day.entries.push(ne);
+  } else day.entries.push(ne);
+  editingEntry = null;
+  md.days[editingDay] = day;
+  showList(); render(); await persist();
+}
+async function deleteSession(entry) {
+  const md = getMonth(viewYear, viewMonth), day = md.days[editingDay];
+  if (!day) return;
+  const i = day.entries.indexOf(entry); if (i > -1) day.entries.splice(i, 1);
+  if (!day.entries.length) { delete md.days[editingDay]; closeModal(); } else renderSessions();
+  render(); await persist();
+}
+
+// ── Reset ──
+function confirmReset(type) {
+  pendingReset = type;
+  $('confirm-title').textContent = type === 'day' ? 'RESET TODAY' : 'RESET MONTH';
+  $('confirm-msg').textContent = type === 'day' ? "This clears all of today's reading sessions. Can't undo." : "This clears ALL reading data for the current month. Previous months stay. Can't undo.";
+  $('confirm-modal').classList.add('open'); $('confirm-yes').onclick = doReset;
+}
+function closeConfirm() { $('confirm-modal').classList.remove('open'); pendingReset = null; }
+async function doReset() {
+  const k = monthKey(today.getFullYear(), today.getMonth());
+  if (pendingReset === 'day') { if (data.months[k] && data.months[k].days) delete data.months[k].days[today.getDate()]; }
+  else data.months[k] = { days: {} };
+  closeConfirm(); viewYear = today.getFullYear(); viewMonth = today.getMonth(); render(); await persist();
+}
+
+// ── Notes tab ──
+const todayStr = () => `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+const fmtDate = s => { if (!s) return ''; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('default', { month: 'short', day: 'numeric', year: 'numeric' }); };
+$('new-date').value = todayStr();
+
+function showTab(t) {
+  currentTab = t;
+  $('main-app').style.display = t === 'tracker' ? 'block' : 'none';
+  $('notes-page').style.display = t === 'notes' ? 'block' : 'none';
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  if (t === 'notes') renderNotes();
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
+  flushNote();
+  if (b.dataset.tab === 'notes' && currentTab === 'notes') showNoteList();
+  showTab(b.dataset.tab);
+});
+
+// every note: standalone notes + notes attached to reading sessions
+function allNotes() {
+  const out = Object.entries(data.notes || {}).map(([id, n]) => ({ kind: 'note', id, title: n.title || 'Untitled', date: n.date || '', body: n.body || '', ts: n.updatedAt || 0 }));
+  Object.entries(data.months || {}).forEach(([k, md]) => {
+    const [y, m] = k.split('-').map(Number);
+    Object.entries(md.days || {}).forEach(([d, v]) => (v.entries || []).forEach(e => {
+      if (e.note) out.push({ kind: 'session', title: `Reading · ${e.start} → ${e.end}`, date: `${k}-${pad(d)}`, body: e.note, ts: 0, y, m: m - 1, d: Number(d) });
+    }));
+  });
+  return out.sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
+}
+
+function renderNotes() {
+  const ns = allNotes();
+  $('notes-count').textContent = ns.length ? ns.length : '';
+  const list = $('np-list'); list.innerHTML = '';
+  if (!ns.length) { list.innerHTML = '<div class="np-empty">No notes yet. Create your first one above.</div>'; return; }
+  ns.forEach(n => {
+    const c = document.createElement('div'); c.className = 'np-item';
+    const dt = document.createElement('div'); dt.className = 'np-date'; dt.textContent = fmtDate(n.date);
+    if (n.kind === 'session') { const b = document.createElement('span'); b.className = 'np-badge'; b.textContent = 'Session'; dt.appendChild(b); }
+    const t = document.createElement('div'); t.className = 'np-title'; t.textContent = n.title;
+    const pv = document.createElement('div'); pv.className = 'np-prev'; pv.textContent = n.body;
+    c.append(dt, t, pv);
+    c.onclick = () => {
+      if (n.kind === 'note') openNote(n.id);
+      else { viewYear = n.y; viewMonth = n.m; showTab('tracker'); renderCalendar(); openDay(n.d); }
+    };
+    list.appendChild(c);
+  });
+}
+
+$('np-create').onclick = () => {
+  const date = $('new-date').value, title = $('new-title').value.trim(), err = $('new-err');
+  if (!date || !title) { err.textContent = 'Date and title are required.'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  const id = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  if (!data.notes) data.notes = {};
+  data.notes[id] = { title, date, body: '', updatedAt: Date.now() };
+  $('new-title').value = ''; $('new-date').value = todayStr();
+  openNote(id); persist();
+};
+function openNote(id) {
+  const n = (data.notes || {})[id]; if (!n) return;
+  editingNoteId = id; noteDirty = false;
+  $('ed-title').value = n.title || ''; $('ed-date').value = n.date || todayStr(); $('ed-body').value = n.body || ''; $('ed-status').textContent = '';
+  $('np-list-view').style.display = 'none'; $('np-edit-view').style.display = 'block';
+  $('ed-body').focus();
+}
+function showNoteList() {
+  flushNote(); editingNoteId = null;
+  $('np-edit-view').style.display = 'none'; $('np-list-view').style.display = 'block'; renderNotes();
+}
+async function flushNote() {
+  clearTimeout(noteTimer);
+  if (!noteDirty || !editingNoteId) return;
+  const n = (data.notes || {})[editingNoteId];
+  noteDirty = false; if (!n) return;
+  n.title = $('ed-title').value.trim(); n.date = $('ed-date').value || n.date; n.body = $('ed-body').value; n.updatedAt = Date.now();
+  $('ed-status').textContent = 'Saving...';
+  await persist(); $('ed-status').textContent = 'Saved';
+}
+['ed-title', 'ed-date', 'ed-body'].forEach(id => $(id).addEventListener('input', () => {
+  noteDirty = true; $('ed-status').textContent = 'Typing...'; clearTimeout(noteTimer); noteTimer = setTimeout(flushNote, 700);
+}));
+$('ed-back').onclick = showNoteList;
+$('ed-delete').onclick = async () => {
+  const n = (data.notes || {})[editingNoteId];
+  if (!confirm(`Delete "${(n && n.title) || 'this note'}"? This can't be undone.`)) return;
+  clearTimeout(noteTimer); noteDirty = false;
+  delete data.notes[editingNoteId]; editingNoteId = null;
+  showNoteList(); await persist();
+};
+
+$('day-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+$('confirm-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeConfirm(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeConfirm(); } });
+</script>
+</body>
+</html>
