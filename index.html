@@ -87,6 +87,13 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
 .day-sub{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase}
 .today-tag{position:absolute;top:4px;right:6px;font-size:7px;letter-spacing:2px;color:var(--accent);opacity:.7}
 @media(max-width:580px){.calendar{gap:4px}.day-cell{min-height:66px;padding:8px 5px 6px}.day-time{font-size:14px}.day-num{font-size:11px}.day-check{width:16px;height:16px;font-size:9px}.stats-row{grid-template-columns:repeat(2,1fr)}.day-sub{font-size:8px}}
+/* insta + quick buttons */
+.day-cell.used{border-color:var(--accent3);background:rgba(71,196,255,.06)}
+.used .day-num,.used .day-time{color:var(--accent3)}
+.quick{display:flex;align-items:center;gap:8px;margin-top:14px}
+.quick span{font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase;margin-right:auto}
+.qbtn{background:var(--surface2);border:1px solid var(--border);color:var(--accent);font-size:13px;font-weight:700;padding:9px 16px;border-radius:8px;cursor:pointer;transition:all .15s}
+.qbtn:hover{border-color:var(--accent);background:rgba(232,255,71,.08)}
 /* top bar + notes */
 .topbar{display:none;position:sticky;top:0;z-index:50;padding:10px 20px;background:rgba(10,10,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
 .tb-in{max-width:900px;margin:0 auto;display:flex;gap:8px}
@@ -173,12 +180,13 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
 </div>
 
 <nav class="topbar" id="topbar"><div class="tb-in">
-  <button class="tab active" data-tab="tracker">Tracker</button>
+  <button class="tab active" data-tab="reading">Reading</button>
+  <button class="tab" data-tab="insta">Insta</button>
   <button class="tab" data-tab="notes">Notes<span class="cnt" id="notes-count"></span></button>
 </div></nav>
 
 <div class="app" id="main-app">
-  <h1>READING<br>TRACKER</h1>
+  <h1 id="page-title">READING<br>TRACKER</h1>
   <div class="month-label" id="month-label">Loading...</div>
 
   <div class="status-banner" id="status-banner">
@@ -188,8 +196,8 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
   </div>
 
   <div class="stats-row">
-    <div class="stat-card"><div class="stat-val c3" id="total-val">0m</div><div class="stat-key">Total Reading This Month</div></div>
-    <div class="stat-card"><div class="stat-val g" id="done-val">0</div><div class="stat-key">Days Completed</div></div>
+    <div class="stat-card"><div class="stat-val c3" id="total-val">0m</div><div class="stat-key" id="k-total">Total Reading This Month</div></div>
+    <div class="stat-card"><div class="stat-val g" id="done-val">0</div><div class="stat-key" id="k-done">Days Completed</div></div>
     <div class="stat-card"><div class="stat-val" id="elapsed-val">0</div><div class="stat-key">Days Elapsed</div></div>
     <div class="stat-card"><div class="stat-val" id="avg-val">0m</div><div class="stat-key">Avg Time / Day</div></div>
   </div>
@@ -260,6 +268,7 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
         <div><label class="form-label">Start</label><input class="time-in" id="in-start" maxlength="5" inputmode="numeric"><div class="wheels"><div class="wheel" id="wh-start-h"></div><div class="colon">:</div><div class="wheel" id="wh-start-m"></div></div></div>
         <div><label class="form-label">End</label><input class="time-in" id="in-end" maxlength="5" inputmode="numeric"><div class="wheels"><div class="wheel" id="wh-end-h"></div><div class="colon">:</div><div class="wheel" id="wh-end-m"></div></div></div>
       </div>
+      <div class="quick"><span>End = start +</span><button type="button" class="qbtn" data-add="5">+5</button><button type="button" class="qbtn" data-add="10">+10</button><button type="button" class="qbtn" data-add="15">+15</button></div>
       <div class="dur-prev" id="dur-prev"></div>
       <textarea class="notes-input" id="note-in" maxlength="300" placeholder="What did you read... (optional)"></textarea>
       <div class="modal-actions"><button class="btn-save" id="btn-save-sess" onclick="saveSession()">Save Session</button><button class="btn-cancel" onclick="cancelAdd()">Cancel</button></div>
@@ -288,7 +297,8 @@ let db = null, unsubscribe = null, data = { months: {} };
 const today = new Date();
 let viewYear = today.getFullYear(), viewMonth = today.getMonth();
 let editingDay = null, pendingReset = null, editingEntry = null;
-let currentTab = 'tracker', editingNoteId = null, noteTimer = null, noteDirty = false;
+let tk = 'reading';
+let currentTab = 'reading', editingNoteId = null, noteTimer = null, noteDirty = false;
 const $ = id => document.getElementById(id);
 
 Object.assign(window, { connectFirebase, disconnectFirebase, navigateMonth, closeModal, showAdd, cancelAdd, saveSession, confirmReset, closeConfirm });
@@ -334,6 +344,7 @@ async function initApp(cfg) {
     data = snap.exists() ? snap.data() : { months: {} };
     if (!data.months) data.months = {};
     if (!data.notes) data.notes = {};
+    if (!data.insta) data.insta = { months: {} };
     setSync('synced', 'Synced');
     render();
     if (editingDay !== null && $('day-modal').classList.contains('open') && $('view-list').style.display !== 'none') renderSessions();
@@ -352,7 +363,11 @@ async function persist() {
 // ── Helpers (all time math in whole minutes → no float rounding issues) ──
 const monthKey = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}`;
 const pad = n => String(n).padStart(2, '0');
-function getMonth(y, m) { const k = monthKey(y, m); if (!data.months[k]) data.months[k] = { days: {} }; if (!data.months[k].days) data.months[k].days = {}; return data.months[k]; }
+function mon() {
+  if (tk === 'insta') { if (!data.insta) data.insta = { months: {} }; if (!data.insta.months) data.insta.months = {}; return data.insta.months; }
+  return data.months;
+}
+function getMonth(y, m) { const M = mon(), k = monthKey(y, m); if (!M[k]) M[k] = { days: {} }; if (!M[k].days) M[k].days = {}; return M[k]; }
 const getEntries = (y, m, d) => (getMonth(y, m).days[d] || {}).entries || [];
 const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const dur = e => { const s = toMin(e.start), n = toMin(e.end); return n > s ? n - s : n + 1440 - s; };
@@ -370,7 +385,13 @@ function renderHeader() {
   $('month-label').textContent = (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 'Current Month' : monthName(viewYear, viewMonth);
   const t = sumMin(getEntries(today.getFullYear(), today.getMonth(), today.getDate()));
   const main = $('status-main'), sub = $('status-sub'), ban = $('status-banner');
-  if (t >= GOAL) {
+  const ins = tk === 'insta';
+  if (ins) {
+    const n = getEntries(today.getFullYear(), today.getMonth(), today.getDate()).length;
+    main.textContent = `${fmt(t)} on Insta today`; main.className = 'status-main';
+    sub.textContent = `${n} session${n === 1 ? '' : 's'} today`; sub.className = 'status-sub';
+    ban.style.setProperty('--sc', 'var(--accent3)');
+  } else if (t >= GOAL) {
     main.textContent = 'Best YouTuber with 100K+ Subs'; main.className = 'status-main glow';
     sub.textContent = 'Way to earn CRs'; sub.className = 'status-sub win';
     ban.style.setProperty('--sc', 'var(--accent)');
@@ -379,11 +400,11 @@ function renderHeader() {
     sub.textContent = 'Time will never come back'; sub.className = 'status-sub';
     ban.style.setProperty('--sc', 'var(--bitch)');
   }
-  $('today-total').textContent = `${fmt(t)} read today · goal ${GOAL}m`;
+  $('today-total').textContent = ins ? '' : `${fmt(t)} read today · goal ${GOAL}m`;
 
   const md = getMonth(today.getFullYear(), today.getMonth());
   let total = 0, done = 0;
-  Object.values(md.days).forEach(v => { const s = sumMin(v.entries || []); total += s; if (s >= GOAL) done++; });
+  Object.values(md.days).forEach(v => { const s = sumMin(v.entries || []); total += s; if (ins ? s > 0 : s >= GOAL) done++; });
   const el = today.getDate();
   $('total-val').textContent = fmt(total); $('done-val').textContent = done; $('elapsed-val').textContent = el; $('avg-val').textContent = fmt(total / el);
 }
@@ -401,9 +422,10 @@ function renderCalendar() {
     const cell = document.createElement('div');
     let cls = 'day-cell';
     if (fut) cls += ' future'; else if (td) cls += ' today';
-    if (!fut && tot >= GOAL) cls += ' done'; else if (!fut && !td) cls += ' miss';
+    if (tk === 'insta') { if (!fut && tot > 0) cls += ' used'; }
+    else if (!fut && tot >= GOAL) cls += ' done'; else if (!fut && !td) cls += ' miss';
     cell.className = cls;
-    cell.innerHTML = `<div class="day-top"><div class="day-num">${d}</div><div class="day-check">${tot >= GOAL ? '✓' : ''}</div></div>` +
+    cell.innerHTML = `<div class="day-top"><div class="day-num">${d}</div>${tk === 'insta' ? '' : `<div class="day-check">${tot >= GOAL ? '✓' : ''}</div>`}</div>` +
       (td ? '<div class="today-tag">TODAY</div>' : '') +
       `<div class="day-time">${tot ? fmt(tot) : '—'}</div><div class="day-sub">${es.length ? es.length + (es.length > 1 ? ' sessions' : ' session') : ''}</div>` +
       (es.some(e => e.note) ? '<div class="note-dot"></div>' : '');
@@ -415,12 +437,12 @@ function renderCalendar() {
 function renderPrev() {
   const bar = $('prev-months-bar'); bar.innerHTML = '';
   const cur = monthKey(today.getFullYear(), today.getMonth());
-  const keys = Object.keys(data.months).filter(k => k < cur).sort().reverse().slice(0, 6);
+  const keys = Object.keys(mon()).filter(k => k < cur).sort().reverse().slice(0, 6);
   if (!keys.length) return;
   bar.innerHTML = '<div class="pm-label">Previous Months</div>';
   keys.forEach(k => {
     const [y, m] = k.split('-').map(Number);
-    const t = Object.values(data.months[k].days || {}).reduce((a, v) => a + sumMin(v.entries || []), 0);
+    const t = Object.values(mon()[k].days || {}).reduce((a, v) => a + sumMin(v.entries || []), 0);
     const p = document.createElement('div'); p.className = 'month-pill';
     p.innerHTML = `${shortMonth(y, m - 1)} <b>${fmt(t)}</b>`; bar.appendChild(p);
   });
@@ -468,6 +490,11 @@ function updateDur() {
   el.className = 'dur-prev';
   el.innerHTML = `Duration <b>${fmt(d)}</b>${em < sm ? ' · crosses midnight' : ''}`;
 }
+
+document.querySelectorAll('.qbtn').forEach(b => b.onclick = () => {
+  const s = pickers.start, tot = (s.h * 60 + s.m + Number(b.dataset.add)) % 1440;
+  setPicker(pickers.end, Math.floor(tot / 60), tot % 60);
+});
 
 // ── Day modal ──
 function openDay(d) {
@@ -537,14 +564,16 @@ async function deleteSession(entry) {
 function confirmReset(type) {
   pendingReset = type;
   $('confirm-title').textContent = type === 'day' ? 'RESET TODAY' : 'RESET MONTH';
-  $('confirm-msg').textContent = type === 'day' ? "This clears all of today's reading sessions. Can't undo." : "This clears ALL reading data for the current month. Previous months stay. Can't undo.";
+  const nm = tk === 'insta' ? 'Insta' : 'reading';
+  $('confirm-msg').textContent = type === 'day' ? `This clears all of today's ${nm} sessions. Can't undo.` : `This clears ALL ${nm} data for the current month. Previous months stay. Can't undo.`;
   $('confirm-modal').classList.add('open'); $('confirm-yes').onclick = doReset;
 }
 function closeConfirm() { $('confirm-modal').classList.remove('open'); pendingReset = null; }
 async function doReset() {
   const k = monthKey(today.getFullYear(), today.getMonth());
-  if (pendingReset === 'day') { if (data.months[k] && data.months[k].days) delete data.months[k].days[today.getDate()]; }
-  else data.months[k] = { days: {} };
+  const M = mon();
+  if (pendingReset === 'day') { if (M[k] && M[k].days) delete M[k].days[today.getDate()]; }
+  else M[k] = { days: {} };
   closeConfirm(); viewYear = today.getFullYear(); viewMonth = today.getMonth(); render(); await persist();
 }
 
@@ -553,9 +582,17 @@ const todayStr = () => `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pa
 const fmtDate = s => { if (!s) return ''; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('default', { month: 'short', day: 'numeric', year: 'numeric' }); };
 $('new-date').value = todayStr();
 
+function applyLabels() {
+  const ins = tk === 'insta';
+  $('page-title').innerHTML = ins ? 'INSTA<br>USAGE' : 'READING<br>TRACKER';
+  $('k-total').textContent = ins ? 'Total Usage This Month' : 'Total Reading This Month';
+  $('k-done').textContent = ins ? 'Days Used' : 'Days Completed';
+  $('note-in').placeholder = ins ? 'Notes... (optional)' : 'What did you read... (optional)';
+}
 function showTab(t) {
   currentTab = t;
-  $('main-app').style.display = t === 'tracker' ? 'block' : 'none';
+  if (t !== 'notes') { tk = t; applyLabels(); render(); }
+  $('main-app').style.display = t !== 'notes' ? 'block' : 'none';
   $('notes-page').style.display = t === 'notes' ? 'block' : 'none';
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   if (t === 'notes') renderNotes();
@@ -570,11 +607,13 @@ document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
 // every note: standalone notes + notes attached to reading sessions
 function allNotes() {
   const out = Object.entries(data.notes || {}).map(([id, n]) => ({ kind: 'note', id, title: n.title || 'Untitled', date: n.date || '', body: n.body || '', ts: n.updatedAt || 0 }));
-  Object.entries(data.months || {}).forEach(([k, md]) => {
-    const [y, m] = k.split('-').map(Number);
-    Object.entries(md.days || {}).forEach(([d, v]) => (v.entries || []).forEach(e => {
-      if (e.note) out.push({ kind: 'session', title: `Reading · ${e.start} → ${e.end}`, date: `${k}-${pad(d)}`, body: e.note, ts: 0, y, m: m - 1, d: Number(d) });
-    }));
+  [['reading', data.months], ['insta', (data.insta || {}).months]].forEach(([which, months]) => {
+    Object.entries(months || {}).forEach(([k, md]) => {
+      const [y, m] = k.split('-').map(Number);
+      Object.entries(md.days || {}).forEach(([d, v]) => (v.entries || []).forEach(e => {
+        if (e.note) out.push({ kind: 'session', tk: which, title: `${which === 'insta' ? 'Insta' : 'Reading'} · ${e.start} → ${e.end}`, date: `${k}-${pad(d)}`, body: e.note, ts: 0, y, m: m - 1, d: Number(d) });
+      }));
+    });
   });
   return out.sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
 }
@@ -587,13 +626,13 @@ function renderNotes() {
   ns.forEach(n => {
     const c = document.createElement('div'); c.className = 'np-item';
     const dt = document.createElement('div'); dt.className = 'np-date'; dt.textContent = fmtDate(n.date);
-    if (n.kind === 'session') { const b = document.createElement('span'); b.className = 'np-badge'; b.textContent = 'Session'; dt.appendChild(b); }
+    if (n.kind === 'session') { const b = document.createElement('span'); b.className = 'np-badge'; b.textContent = n.tk === 'insta' ? 'Insta' : 'Reading'; dt.appendChild(b); }
     const t = document.createElement('div'); t.className = 'np-title'; t.textContent = n.title;
     const pv = document.createElement('div'); pv.className = 'np-prev'; pv.textContent = n.body;
     c.append(dt, t, pv);
     c.onclick = () => {
       if (n.kind === 'note') openNote(n.id);
-      else { viewYear = n.y; viewMonth = n.m; showTab('tracker'); renderCalendar(); openDay(n.d); }
+      else { viewYear = n.y; viewMonth = n.m; showTab(n.tk); renderCalendar(); openDay(n.d); }
     };
     list.appendChild(c);
   });
