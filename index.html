@@ -16,7 +16,7 @@
 body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;min-height:100vh;overflow-x:hidden}
 button{font-family:inherit}
 /* setup + loading */
-#setup-screen{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;align-items:center;justify-content:center;padding:20px;overflow:auto}
+#setup-screen,#login-screen{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;align-items:center;justify-content:center;padding:20px;overflow:auto}
 .setup-box{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:36px;width:100%;max-width:520px}
 .setup-box h2{font-family:'Bebas Neue';font-size:32px;letter-spacing:3px;margin-bottom:6px}.setup-box h2 span{color:var(--accent)}
 .setup-sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:22px;line-height:1.6}
@@ -181,6 +181,15 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
   </div>
 </div>
 
+<div id="login-screen">
+  <div class="setup-box" style="text-align:center">
+    <h2>SIGN <span>IN</span></h2>
+    <div class="setup-sub">Private tracker. Only the owner's Google account can open it.</div>
+    <div class="setup-err" id="login-err"></div>
+    <button class="btn-connect" id="btn-google">Sign in with Google</button>
+  </div>
+</div>
+
 <nav class="topbar" id="topbar"><div class="tb-in">
   <button class="tab active" data-tab="reading">Reading</button>
   <button class="tab" data-tab="insta">Insta</button>
@@ -209,6 +218,7 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
     <button class="btn warn" onclick="confirmReset('day')">⟳ Reset Today</button>
     <button class="btn danger" onclick="confirmReset('month')">✕ Reset Month</button>
     <div class="sync-bar"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">—</span></div>
+    <button class="btn ghost" id="btn-signout">⎋ Sign out</button>
     <button class="btn ghost" onclick="disconnectFirebase()">⚙ Disconnect</button>
   </div>
 
@@ -290,13 +300,14 @@ h1{font-family:'Bebas Neue';font-size:clamp(42px,8vw,72px);letter-spacing:4px;li
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const CFG_KEY = 'reading_tracker_firebase_cfg';
 const OLD_KEY = 'study_tracker_firebase_cfg'; // reuse study tracker config if present
 const GOAL = 10; // minutes per day
 const loadCfg = () => { try { return JSON.parse(localStorage.getItem(CFG_KEY) || localStorage.getItem(OLD_KEY)); } catch { return null; } };
 
-let db = null, unsubscribe = null, data = { months: {} };
+let db = null, auth = null, unsubscribe = null, data = { months: {} };
 const today = new Date();
 let viewYear = today.getFullYear(), viewMonth = today.getMonth();
 let editingDay = null, pendingReset = null, editingEntry = null;
@@ -321,6 +332,12 @@ function showSetup() {
   setTimeout(() => { $('loading-screen').style.display = 'none'; $('setup-screen').style.display = 'flex'; }, 400);
 }
 
+function showLogin() {
+  $('loading-screen').classList.add('hidden');
+  $('setup-screen').style.display = 'none';
+  setTimeout(() => { $('loading-screen').style.display = 'none'; $('login-screen').style.display = 'flex'; }, 400);
+}
+
 async function connectFirebase() {
   const cfg = { apiKey: $('cfg-apiKey').value.trim(), authDomain: $('cfg-authDomain').value.trim(), projectId: $('cfg-projectId').value.trim(), appId: $('cfg-appId').value.trim() };
   if (!cfg.apiKey || !cfg.projectId || !cfg.appId) { $('setup-err').style.display = 'block'; return; }
@@ -342,10 +359,35 @@ async function connectFirebase() {
 async function initApp(cfg) {
   const app = initializeApp(cfg, 'reading-' + Date.now());
   db = getFirestore(app);
+  auth = getAuth(app);
+  await new Promise(resolve => {
+    onAuthStateChanged(auth, async user => {
+      if (user) {
+        try { await startApp(user); }
+        catch (e) {
+          console.error(e);
+          const denied = (e.code || '').includes('permission-denied');
+          $('login-err').textContent = denied
+            ? '⚠ ' + (user.email || 'This account') + ' does not have access to this tracker. Sign in with the owner account.'
+            : '⚠ ' + (e.code || 'error') + ': ' + e.message;
+          $('login-err').style.display = 'block';
+          signOut(auth);
+        }
+      } else { stopApp(); showLogin(); }
+      resolve();
+    });
+  });
+}
+
+async function startApp(user) {
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   const ref = doc(db, 'tracker', 'reading');
-  await getDoc(ref);
+  await getDoc(ref); // throws permission-denied if the rules don't allow this account
+  $('login-err').style.display = 'none';
+  $('btn-signout').title = 'Signed in as ' + (user.email || '');
   $('loading-screen').classList.add('hidden');
   $('setup-screen').style.display = 'none';
+  $('login-screen').style.display = 'none';
   setTimeout(() => { $('loading-screen').style.display = 'none'; $('topbar').style.display = 'block'; showTab(currentTab); }, 400);
   setSync('syncing', 'Connecting...');
   unsubscribe = onSnapshot(ref, snap => {
@@ -359,6 +401,32 @@ async function initApp(cfg) {
     if (editingDay !== null && $('day-modal').classList.contains('open') && $('view-list').style.display !== 'none') renderSessions();
   }, err => { setSync('error', 'Sync error'); console.error(err); });
 }
+
+// signed out: stop listening, wipe data from memory, hide the whole app
+function stopApp() {
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  data = { months: {}, notes: {}, insta: { months: {} }, waste: { months: {} } };
+  ['topbar', 'main-app', 'notes-page'].forEach(id => $(id).style.display = 'none');
+  $('day-modal').classList.remove('open'); $('confirm-modal').classList.remove('open');
+  editingDay = null; editingNoteId = null; noteDirty = false;
+}
+
+$('btn-signout').onclick = () => signOut(auth);
+$('btn-google').onclick = async () => {
+  const err = $('login-err'); err.style.display = 'none'; $('btn-google').disabled = true;
+  const hints = {
+    'auth/popup-blocked': 'The sign-in popup was blocked. Allow popups for this site and try again.',
+    'auth/popup-closed-by-user': 'Sign-in was cancelled.',
+    'auth/cancelled-popup-request': 'Sign-in was cancelled.',
+    'auth/unauthorized-domain': 'This domain is not authorized. Add it in Firebase Console > Authentication > Settings > Authorized domains.',
+    'auth/operation-not-allowed': 'Google sign-in is not enabled. Enable it in Firebase Console > Authentication > Sign-in method.',
+    'auth/operation-not-supported-in-this-environment': 'Sign-in needs the page served over http(s) (Firebase Hosting, GitHub Pages or localhost), not opened as a local file.',
+    'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'The API key is invalid. Use Disconnect and re-enter your Firebase config.'
+  };
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch (e) { err.textContent = '⚠ ' + (hints[e.code] || (e.code || 'error') + ': ' + e.message); err.style.display = 'block'; }
+  $('btn-google').disabled = false;
+};
 
 function disconnectFirebase() { if (unsubscribe) unsubscribe(); localStorage.removeItem(CFG_KEY); localStorage.removeItem(OLD_KEY); location.reload(); }
 function setSync(s, l) { $('sync-dot').className = 'sync-dot ' + s; $('sync-label').textContent = l; }
